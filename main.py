@@ -6,6 +6,7 @@ import os
 
 import requests
 import telebot
+from datetime import datetime
 
 OW_API = os.getenv("OW_API")
 TG_BOT_API = os.getenv("TG_BOT_API")
@@ -24,8 +25,8 @@ def get_weather() -> str | None:
     print(weather_data.status_code)
     if weather_data.status_code == 200:
         weather_data = weather_data.json()
-        text = f"Погода {icons[weather_data['weather'][0]['icon']]}: {weather_data['main']['temp']}°C" \
-               f" (ощ. {weather_data['main']['feels_like']}°C), " \
+        text = f"Погода {icons[weather_data['weather'][0]['icon']]}: {int(weather_data['main']['temp'])}°C" \
+               f" (ощ. {int(weather_data['main']['feels_like'])}°C), " \
                f"{weather_data['weather'][0]['description']}"
         return text
     else:
@@ -41,8 +42,8 @@ def get_birthday() -> str | None:
     with open("./birthdays.csv", "r") as file:
         csv_file = csv.DictReader(file)
         for line in csv_file:
-            # if line["date"] == f"{datetime.today().day}-{datetime.today().month}":
-            if line['date'] == "04-02":
+            if line["date"] == f"{datetime.today().day}-{datetime.today().month}":
+            # if line['date'] == "04-02":
                 names.append(line["Name"])
     if len(names) == 0:
         return ""
