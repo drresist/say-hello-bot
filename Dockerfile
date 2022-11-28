@@ -8,4 +8,4 @@ WORKDIR /home/user
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 COPY . .
-ENTRYPOINT ["python", "src/main.py"]
+ENTRYPOINT ["python", "main.py"]
