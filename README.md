@@ -5,4 +5,4 @@
 
 ## Starting 
 
-- Run docker image with next cmd docker run -e OW_API={openweather API token} -e TG_BOT_API={tg bot api} -e CHAT_ID={chat for sending} --rm       drresist/sh-bot:latest
+- Run docker image with next cmd docker run -e OW_API={openweather API token} -e BDCSV={csv file with birthdays} -e TG_BOT_API={tg bot api} -e CHAT_ID={chat for sending} --rm       drresist/sh-bot:latest
