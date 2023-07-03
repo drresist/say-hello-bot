@@ -1,12 +1,11 @@
-from __future__ import annotations
-
 import csv
+from datetime import datetime
 import json
 import os
-
+import time
 import requests
 import telebot
-from datetime import datetime
+from loguru import logger
 
 OW_API = os.getenv("OW_API")
 TG_BOT_API = os.getenv("TG_BOT_API")
@@ -14,58 +13,45 @@ CHAT_ID = os.getenv("CHAT_ID")
 
 
 def get_weather() -> str | None:
-    """
-    Request weather from openWeatherApi and format
-    :return: str if ok, else None
-    """
-    url = f"http://api.openweathermap.org/data/2.5/weather?q=Moscow&appid={OW_API}&lang=ru&units=metric"
-    weather_data = requests.get(url)
-    with open('icons.json', 'r', encoding='utf-8') as f:
-        icons = json.load(f)
-    print(weather_data.status_code)
-    if weather_data.status_code == 200:
-        weather_data = weather_data.json()
+    url = "http://api.openweathermap.org/data/2.5/weather"
+    params = {
+        "q": "Moscow",
+        "appid": OW_API,
+        "lang": "ru",
+        "units": "metric"
+    }
+    try:
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        weather_data = response.json()
+        with open('icons.json', 'r', encoding='utf-8') as f:
+            icons = json.load(f)
         text = f"Погода {icons[weather_data['weather'][0]['icon']]}: {int(weather_data['main']['temp'])}°C" \
                f" (ощ. {int(weather_data['main']['feels_like'])}°C), " \
                f"{weather_data['weather'][0]['description']}"
+        logger.info(text)
         return text
-    else:
-        return ""
+    except (requests.RequestException, json.JSONDecodeError):
+        logger.exception("Failed to get weather data")
+        return None
 
-
-def get_birthday() -> str | None:
-    """
-    Read birthday csv file in format "Name", "DD-MM"
-    :return: return Name or None
-    """
+def get_birthday() -> str:
     names = []
     with open("./birthdays.csv", "r") as file:
         csv_file = csv.DictReader(file)
-        for line in csv_file:
-            if line["date"] == f"{datetime.today().day}-{datetime.today().month}":
-            # if line['date'] == "04-02":
-                names.append(line["Name"])
-    if len(names) == 0:
-        return ""
-    else:
-        return "День рождения у 🎂: \n" + '\n'.join(names)
+        names = [line["Name"] for line in csv_file if line["date"] == f"{datetime.today().day}-{datetime.today().month}"]
+    return "День рождения у 🎂: \n" + '\n'.join(names)
 
 
 def create_message() -> str:
-    """
-    Format message for sending by tgbot
-    :return: formatted str
-    """
-    return f"*Всем привет!👋*\n" \
-           f"{get_weather()}\n" \
-           f"{get_birthday()}\n"
+    return (
+        "*Всем привет!👋*\n"
+        f"{get_weather()}\n"
+        f"{get_birthday()}\n"
+    )
 
 
 def send_message(text: str) -> None:
-    """
-    Send formated message
-    :return:
-    """
     bot = telebot.TeleBot(token=TG_BOT_API)
     bot.send_message(
         text=text,
@@ -76,8 +62,24 @@ def send_message(text: str) -> None:
 
 
 def main() -> None:
-    send_message(create_message())
+    """
+    This function is the main entry point of the program. It runs an infinite loop and checks if today is a weekday. If it is a weekday, it checks if the current time is 8:00 AM. If both conditions are true, it logs a message and sends a message by calling the create_message() function and passing the message to the send_message() function.
+
+    Parameters: 
+    None
+
+    Returns: 
+    None
+    """
+    while True:
+        # check if today is monday-friday
+        if datetime.now().weekday() < 5:
+            if datetime.now().hour == 8 and datetime.now().minute == 0:
+                logger.info("Sending message ")
+                send_message(create_message())
+        time.sleep(60)
 
 
 if __name__ == '__main__':
+    logger.info("Starting bot")
     main()
