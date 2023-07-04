@@ -1,32 +1,45 @@
-import csv
-from datetime import datetime
-import json
+# Import necessary libraries
 import os
-import time
+from typing import List
 import requests
-import telebot
+import time
+import datetime
+import telegram
 from loguru import logger
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, JobQueue
+import json
 
-OW_API = os.getenv("OW_API")
-TG_BOT_API = os.getenv("TG_BOT_API")
-CHAT_ID = os.getenv("CHAT_ID")
+# Set up weather API and Telegram API keys
+weather_api_key: str = os.getenv("OW_API")
+telegram_bot_token: str = os.getenv("TG_BOT_API")
+chat_id: str = os.getenv("CHAT_ID")
 
 
-def get_weather() -> str | None:
-    url = "http://api.openweathermap.org/data/2.5/weather"
-    params = {
+counter: int = 0
+pressed_users: dict = {}
+
+def get_weather_data() -> str | None:
+    """Get current weather data.
+
+    Returns:
+        str: Current weather data in string format.
+        None: If failed to get weather data.
+    """
+    url: str = "http://api.openweathermap.org/data/2.5/weather"
+    params: dict[str, str] = {
         "q": "Moscow",
-        "appid": OW_API,
+        "appid": weather_api_key,
         "lang": "ru",
         "units": "metric"
     }
     try:
         response = requests.get(url, params=params)
         response.raise_for_status()
-        weather_data = response.json()
+        weather_data: dict = response.json()
         with open('icons.json', 'r', encoding='utf-8') as f:
-            icons = json.load(f)
-        text = f"Погода {icons[weather_data['weather'][0]['icon']]}: {int(weather_data['main']['temp'])}°C" \
+            icons: dict = json.load(f)
+        text: str = f"Погода {icons[weather_data['weather'][0]['icon']]}: {int(weather_data['main']['temp'])}°C" \
                f" (ощ. {int(weather_data['main']['feels_like'])}°C), " \
                f"{weather_data['weather'][0]['description']}"
         logger.info(text)
@@ -35,51 +48,66 @@ def get_weather() -> str | None:
         logger.exception("Failed to get weather data")
         return None
 
-def get_birthday() -> str:
-    names = []
-    with open("./birthdays.csv", "r") as file:
-        csv_file = csv.DictReader(file)
-        names = [line["Name"] for line in csv_file if line["date"] == f"{datetime.today().day}-{datetime.today().month}"]
-    return "День рождения у 🎂: \n" + '\n'.join(names)
+def send_weather_message(context: telegram.ext.CallbackContext) -> None:
+    """Send weather message at 8 a.m. every day.
 
+    Args:
+        context (telegram.ext.CallbackContext): The context of the job.
 
-def create_message() -> str:
-    return (
-        "*Всем привет!👋*\n"
-        f"{get_weather()}\n"
-        f"{get_birthday()}\n"
-    )
-
-
-def send_message(text: str) -> None:
-    bot = telebot.TeleBot(token=TG_BOT_API)
-    bot.send_message(
-        text=text,
-        chat_id=CHAT_ID,
-        disable_notification=True,
-        parse_mode="markdown"
-    )
-
-
-def main() -> None:
+    Returns:
+        None
     """
-    This function is the main entry point of the program. It runs an infinite loop and checks if today is a weekday. If it is a weekday, it checks if the current time is 8:00 AM. If both conditions are true, it logs a message and sends a message by calling the create_message() function and passing the message to the send_message() function.
+    weather_data: str | None = get_weather_data()
+    counter: int = 0
+    keyboard: List[List[InlineKeyboardButton]] = [[InlineKeyboardButton("+1", callback_data="add_one")]]
+    reply_markup: InlineKeyboardMarkup = InlineKeyboardMarkup(keyboard)
+    bot: telegram.Bot = telegram.Bot(token=telegram_bot_token)
+    bot.send_message(chat_id=chat_id, text=weather_data, reply_markup=reply_markup)
 
-    Parameters: 
-    None
+def add_one_callback(update: telegram.Update, context: telegram.ext.CallbackContext) -> None:
+    """Callback function for +1 button.
 
-    Returns: 
-    None
+    Args:
+        update (telegram.Update): The received update.
+        context (telegram.ext.CallbackContext): The context of the callback.
+
+    Returns:
+        None
     """
-    while True:
-        # check if today is monday-friday
-        if datetime.now().weekday() < 5:
-            if datetime.now().hour == 8 and datetime.now().minute == 0:
-                logger.info("Sending message ")
-                send_message(create_message())
-        time.sleep(60)
+    global counter
+    user_id = update.effective_user.id
+    if user_id not in pressed_users:
+        logger.info(f"Button pressed by user {update.effective_user.full_name} - {user_id}")
+        counter += 1
+        pressed_users[user_id] = True
 
+def send_report_message(context: telegram.ext.CallbackContext) -> None:
+    """Send report message at 9 a.m. every day.
 
-if __name__ == '__main__':
-    logger.info("Starting bot")
-    main()
+    Args:
+        context (telegram.ext.CallbackContext): The context of the job.
+
+    Returns:
+        None
+    """
+    global counter
+    report_message: str = f"Проснулись: {counter} человек"
+    bot: telegram.Bot = telegram.Bot(token=telegram_bot_token)
+    bot.send_message(chat_id=chat_id, text=report_message)
+    bot.edit_message_text(context.text, chat_id=chat_id, message_id=context.message.message_id)
+    counter = 0
+    pressed_users.clear()
+
+updater: Updater = Updater(token=telegram_bot_token, use_context=True)
+job_queue: JobQueue = updater.job_queue
+
+job_queue.run_repeating(send_weather_message, interval=5)
+updater.dispatcher.add_handler(CallbackQueryHandler(add_one_callback))
+
+# Schedule report message to be sent at 9 a.m. every day
+# job_queue.run_daily(send_report_message, time=datetime.time(hour=11, minute=54))
+job_queue.run_repeating(send_report_message, interval=10)
+
+# Start the bot
+updater.start_polling()
+updater.idle()
