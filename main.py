@@ -1,113 +1,85 @@
-# Import necessary libraries
 import os
-from typing import List
-import requests
-import time
-import datetime
-import telegram
-from loguru import logger
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, JobQueue
 import json
+import requests
+import telegram
+import datetime
+from typing import List
+from loguru import logger
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 
-# Set up weather API and Telegram API keys
-weather_api_key: str = os.getenv("OW_API")
-telegram_bot_token: str = os.getenv("TG_BOT_API")
-chat_id: str = os.getenv("CHAT_ID")
+from telegram.ext import Updater, JobQueue, CallbackContext, CallbackQueryHandler
+
+WEATHER_API_KEY = os.getenv("OW_API")
+TELEGRAM_BOT_TOKEN = os.getenv("TG_BOT_API")
+CHAT_ID = os.getenv("CHAT_ID")
+
+ICONS = {}
+with open("icons.json", "r", encoding="utf-8") as f:
+    ICONS = json.load(f)
 
 
-counter: int = 0
-pressed_users: dict = {}
-
-def get_weather_data() -> str | None:
-    """Get current weather data.
-
-    Returns:
-        str: Current weather data in string format.
-        None: If failed to get weather data.
-    """
-    url: str = "http://api.openweathermap.org/data/2.5/weather"
-    params: dict[str, str] = {
-        "q": "Moscow",
-        "appid": weather_api_key,
-        "lang": "ru",
-        "units": "metric"
-    }
+def get_weather_data() -> str:
+    url = "http://api.openweathermap.org/data/2.5/weather"
+    params = {"q": "Moscow", "appid": WEATHER_API_KEY, "lang": "ru", "units": "metric"}
     try:
         response = requests.get(url, params=params)
         response.raise_for_status()
-        weather_data: dict = response.json()
-        with open('icons.json', 'r', encoding='utf-8') as f:
-            icons: dict = json.load(f)
-        text: str = f"Погода {icons[weather_data['weather'][0]['icon']]}: {int(weather_data['main']['temp'])}°C" \
-               f" (ощ. {int(weather_data['main']['feels_like'])}°C), " \
-               f"{weather_data['weather'][0]['description']}"
-        logger.info(text)
-        return text
-    except (requests.RequestException, json.JSONDecodeError):
-        logger.exception("Failed to get weather data")
-        return None
+        weather_data = response.json()
+        return f"Погода {ICONS[weather_data['weather'][0]['icon']]}: {int(weather_data['main']['temp'])}°C (ощ. {int(weather_data['main']['feels_like'])}°C), {weather_data['weather'][0]['description']}"
+    except Exception as e:
+        logger.error(f"Failed to get weather data: {e}")
+        return ""
 
-def send_weather_message(context: telegram.ext.CallbackContext) -> None:
-    """Send weather message at 8 a.m. every day.
 
-    Args:
-        context (telegram.ext.CallbackContext): The context of the job.
+def send_weather_message(context: CallbackContext) -> None:
+    weather_data = get_weather_data()
+    keyboard = [[InlineKeyboardButton("+1", callback_data="add_one")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
 
-    Returns:
-        None
-    """
-    weather_data: str | None = get_weather_data()
-    counter: int = 0
-    keyboard: List[List[InlineKeyboardButton]] = [[InlineKeyboardButton("+1", callback_data="add_one")]]
-    reply_markup: InlineKeyboardMarkup = InlineKeyboardMarkup(keyboard)
-    bot: telegram.Bot = telegram.Bot(token=telegram_bot_token)
-    bot.send_message(chat_id=chat_id, text=weather_data, reply_markup=reply_markup)
+    bot.send_message(chat_id=CHAT_ID, text=weather_data, reply_markup=reply_markup)
 
-def add_one_callback(update: telegram.Update, context: telegram.ext.CallbackContext) -> None:
-    """Callback function for +1 button.
 
-    Args:
-        update (telegram.Update): The received update.
-        context (telegram.ext.CallbackContext): The context of the callback.
+def add_one_callback(update: Update, context: CallbackContext) -> None:
+    if not update.callback_query.from_user.id in context.user_data:
+        user = update.callback_query.from_user
+        logger.info(f"Button pressed by user {user.full_name} - {user.id}")
+        context.user_data[update.callback_query.from_user.id] = True
 
-    Returns:
-        None
-    """
-    global counter
-    user_id = update.effective_user.id
-    if user_id not in pressed_users:
-        logger.info(f"Button pressed by user {update.effective_user.full_name} - {user_id}")
-        counter += 1
-        pressed_users[user_id] = True
 
-def send_report_message(context: telegram.ext.CallbackContext) -> None:
-    """Send report message at 9 a.m. every day.
+def send_report_message(context: CallbackContext) -> None:
+    report_message = f"Проснулись: {len(user_data.keys())} человек"
+    bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
 
-    Args:
-        context (telegram.ext.CallbackContext): The context of the job.
+    keyboard = [
+        [InlineKeyboardButton("Send report again", callback_data="resend_report")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    message = bot.send_message(
+        chat_id=CHAT_ID, text=report_message, reply_markup=reply_markup
+    )
+    context.user_data.clear()
 
-    Returns:
-        None
-    """
-    global counter
-    report_message: str = f"Проснулись: {counter} человек"
-    bot: telegram.Bot = telegram.Bot(token=telegram_bot_token)
-    bot.send_message(chat_id=chat_id, text=report_message)
-    bot.edit_message_text(context.text, chat_id=chat_id, message_id=context.message.message_id)
-    counter = 0
-    pressed_users.clear()
 
-updater: Updater = Updater(token=telegram_bot_token, use_context=True)
-job_queue: JobQueue = updater.job_queue
+def restart_handler(update: Update, context: CallbackContext) -> None:
+    send_report_message(context)
 
-job_queue.run_repeating(send_weather_message, interval=5)
-updater.dispatcher.add_handler(CallbackQueryHandler(add_one_callback))
 
-# Schedule report message to be sent at 9 a.m. every day
-# job_queue.run_daily(send_report_message, time=datetime.time(hour=11, minute=54))
-job_queue.run_repeating(send_report_message, interval=10)
+def schedule_jobs(updater: Updater) -> JobQueue:
+    job_queue = updater.job_queue
 
-# Start the bot
-updater.start_polling()
-updater.idle()
+    job_queue.run_daily(send_weather_message, time=datetime.time(8, 0, 0))
+    job_queue.run_daily(send_report_message, time=datetime.time(9, 15, 0))
+    updater.dispatcher.add_handler(CallbackQueryHandler(add_one_callback))
+    return job_queue
+
+
+def start_bot():
+    updater = Updater(token=TELEGRAM_BOT_TOKEN, use_context=True)
+    schedule_jobs(updater)
+    updater.start_polling()
+    updater.idle()
+
+
+if __name__ == "__main__":
+    start_bot()
