@@ -48,7 +48,7 @@ def add_one_callback(update: Update, context: CallbackContext) -> None:
 
 
 def send_report_message(context: CallbackContext) -> None:
-    report_message = f"Проснулись: {len(user_data.keys())} человек"
+    report_message = f"Проснулись: {len(context.user_data.keys())} человек"
     bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
 
     keyboard = [
